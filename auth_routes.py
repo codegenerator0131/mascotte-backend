@@ -19,16 +19,6 @@ def init_auth_routes(mysql):
     
     @auth_bp.route('/register', methods=['POST'])
     def register():
-        """
-        Register a new user
-        
-        Expected JSON:
-        {
-            "email": "user@example.com",
-            "full_name": "John Doe",
-            "password": "securepassword123"
-        }
-        """
         try:
             data = request.get_json()
             
@@ -67,8 +57,8 @@ def init_auth_routes(mysql):
             user = user_repo.create_user(email, full_name, password)
             
             # Generate tokens
-            access_token = create_access_token(identity=user.id)
-            refresh_token = create_refresh_token(identity=user.id)
+            access_token = create_access_token(identity=str(user.id))
+            refresh_token = create_refresh_token(identity=str(user.id))
             
             return jsonify({
                 'message': 'User registered successfully',
@@ -82,15 +72,6 @@ def init_auth_routes(mysql):
     
     @auth_bp.route('/login', methods=['POST'])
     def login():
-        """
-        Login user and return tokens
-        
-        Expected JSON:
-        {
-            "email": "user@example.com",
-            "password": "securepassword123"
-        }
-        """
         try:
             data = request.get_json()
             
@@ -114,8 +95,8 @@ def init_auth_routes(mysql):
                 return jsonify({'error': 'Invalid email or password'}), 401
             
             # Generate tokens
-            access_token = create_access_token(identity=user.id)
-            refresh_token = create_refresh_token(identity=user.id)
+            access_token = create_access_token(identity=str(user.id))
+            refresh_token = create_refresh_token(identity=str(user.id))
             
             return jsonify({
                 'message': 'Login successful',
@@ -130,12 +111,6 @@ def init_auth_routes(mysql):
     @auth_bp.route('/refresh', methods=['POST'])
     @jwt_required(refresh=True)
     def refresh():
-        """
-        Refresh access token using refresh token
-        
-        Headers:
-        Authorization: Bearer <refresh_token>
-        """
         try:
             # Get current user identity from refresh token
             current_user_id = get_jwt_identity()
@@ -153,19 +128,7 @@ def init_auth_routes(mysql):
     @auth_bp.route('/logout', methods=['POST'])
     @jwt_required()
     def logout():
-        """
-        Logout user
-        
-        Note: Without token blacklisting, logout is handled client-side by removing tokens.
-        This endpoint exists for consistency and can be extended with additional logic.
-        
-        Headers:
-        Authorization: Bearer <access_token>
-        """
         try:
-            # You can add additional logout logic here if needed
-            # For example: logging, analytics, session cleanup, etc.
-            
             return jsonify({
                 'message': 'Logout successful. Please remove tokens from client.'
             }), 200
@@ -173,81 +136,24 @@ def init_auth_routes(mysql):
         except Exception as e:
             return jsonify({'error': f'Logout failed: {str(e)}'}), 500
     
-    @auth_bp.route('/me', methods=['GET'])
+    @auth_bp.route('/verify-token', methods=['GET'])
     @jwt_required()
-    def get_current_user():
-        """
-        Get current user information
-        
-        Headers:
-        Authorization: Bearer <access_token>
-        """
+    def verify_token():
+        """Debug endpoint to verify token is working"""
         try:
-            # Get current user
             current_user_id = get_jwt_identity()
-            user = user_repo.get_user_by_id(current_user_id)
-            
-            if not user:
-                return jsonify({'error': 'User not found'}), 404
+            jwt_data = get_jwt()
             
             return jsonify({
-                'user': user.to_dict()
+                'message': 'Token is valid',
+                'user_id': current_user_id,
+                'token_type': jwt_data.get('type', 'access'),
+                'expires_at': jwt_data.get('exp', None)
             }), 200
-            
         except Exception as e:
-            return jsonify({'error': f'Failed to get user: {str(e)}'}), 500
-    
-    @auth_bp.route('/change-password', methods=['POST'])
-    @jwt_required()
-    def change_password():
-        """
-        Change user password
-        
-        Headers:
-        Authorization: Bearer <access_token>
-        
-        Expected JSON:
-        {
-            "old_password": "oldpassword123",
-            "new_password": "newpassword123"
-        }
-        """
-        try:
-            data = request.get_json()
-            
-            if not data:
-                return jsonify({'error': 'No data provided'}), 400
-            
-            old_password = data.get('old_password', '')
-            new_password = data.get('new_password', '')
-            
-            if not old_password or not new_password:
-                return jsonify({'error': 'Old password and new password are required'}), 400
-            
-            # Validate new password strength
-            if len(new_password) < 8:
-                return jsonify({'error': 'New password must be at least 8 characters long'}), 400
-            
-            # Get current user
-            current_user_id = get_jwt_identity()
-            user = user_repo.get_user_by_id(current_user_id)
-            
-            if not user:
-                return jsonify({'error': 'User not found'}), 404
-            
-            # Verify old password
-            if not User.verify_password(user.password_hash, old_password):
-                return jsonify({'error': 'Old password is incorrect'}), 401
-            
-            # Update password
-            new_password_hash = User.hash_password(new_password)
-            user_repo.update_user(current_user_id, password_hash=new_password_hash)
-            
             return jsonify({
-                'message': 'Password changed successfully'
-            }), 200
-            
-        except Exception as e:
-            return jsonify({'error': f'Password change failed: {str(e)}'}), 500
-    
+                'error': 'Token verification failed',
+                'details': str(e)
+            }), 401
+
     return auth_bp
