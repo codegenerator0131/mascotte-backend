@@ -9,6 +9,7 @@ from datetime import timedelta
 from auth_routes import init_auth_routes
 from avatar_routes import init_avatar_routes
 from garment_routes import init_garment_routes
+from image_routes import image_bp
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +41,7 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', '')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=4)
 app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
 app.config['JWT_ALGORITHM'] = 'HS256'
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 # Initialize extensions
 mysql = MySQL(app)
@@ -81,6 +83,8 @@ app.register_blueprint(avatar_bp)
 
 garment_bp = init_garment_routes(mysql)
 app.register_blueprint(garment_bp)
+
+app.register_blueprint(image_bp)
 
 
 @app.route('/health', methods=['GET'])
@@ -151,6 +155,15 @@ def index():
                 'create': 'POST /api/garments/',
                 'update': 'PUT /api/garments/<garment_id>',
                 'delete': 'DELETE /api/garments/<garment_id>'
+            },
+            'images': {
+                'upload_single': 'POST /api/images/upload',
+                'upload_multiple': 'POST /api/images/upload/multiple',
+                'get_image': 'GET /api/images/<key>',
+                'get_image_url': 'GET /api/images/<key>/url',
+                'delete_image': 'DELETE /api/images/<key>',
+                'list_images': 'GET /api/images/list',
+                'check_exists': 'GET /api/images/exists/<key>'
             }
         }
     }), 200
