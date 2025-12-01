@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) UNIQUE NOT NULL,
     full_name VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    credits INT NOT NULL DEFAULT 100,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_email (email)
@@ -91,11 +92,32 @@ CREATE TABLE IF NOT EXISTS avatar_garments (
     INDEX idx_garment_id (garment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert sample garments
-INSERT INTO garments (name, brand, price, rating, image_url, description, category, style) VALUES
-('Classic White T-Shirt', 'Uniqlo', 19.99, 4.5, '👕', 'A timeless white t-shirt made from premium cotton', 'tops', 'casual'),
-('Slim Fit Jeans', 'Zara', 49.99, 4.3, '👖', 'Modern slim fit jeans with stretch fabric', 'bottoms', 'casual'),
-('Running Shorts', 'Nike', 34.99, 4.7, '🩳', 'Performance running shorts with moisture-wicking technology', 'bottoms', 'sporty'),
-('Blazer Jacket', 'H&M', 79.99, 4.2, '🧥', 'Professional blazer for business and formal occasions', 'outerwear', 'modern'),
-('Summer Dress', 'Zara', 59.99, 4.6, '👗', 'Light and breezy summer dress perfect for warm weather', 'dresses', 'casual'),
-('Hoodie', 'Adidas', 64.99, 4.4, '🧥', 'Comfortable hoodie with kangaroo pocket', 'outerwear', 'sporty');
+CREATE TABLE IF NOT EXISTS credit_plans (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    credits INT NOT NULL,
+    price DECIMAL(10, 2) NOT NULL,
+    is_popular BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_is_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    transaction_type ENUM('purchase', 'usage', 'refund', 'bonus', 'initial') NOT NULL,
+    amount DECIMAL(10, 2) DEFAULT 0.00,
+    credits INT NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    status ENUM('completed', 'pending', 'failed') DEFAULT 'completed',
+    reference_id VARCHAR(100) NULL,
+    metadata JSON NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_transaction_type (transaction_type),
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

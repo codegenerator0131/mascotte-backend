@@ -8,7 +8,7 @@ from flask_jwt_extended import (
 )
 from email_validator import validate_email, EmailNotValidError
 from models import User, UserRepository
-from datetime import datetime, timedelta
+from credit_models import CreditTransactionRepository
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -16,6 +16,7 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 def init_auth_routes(mysql):
     """Initialize authentication routes with database connection"""
     user_repo = UserRepository(mysql)
+    transaction_repo = CreditTransactionRepository(mysql)
     
     @auth_bp.route('/register', methods=['POST'])
     def register():
@@ -53,8 +54,20 @@ def init_auth_routes(mysql):
             if user_repo.email_exists(email):
                 return jsonify({'error': 'Email already registered'}), 409
             
-            # Create user
+            # Create user (automatically gets 100 credits)
             user = user_repo.create_user(email, full_name, password)
+            
+            # Log initial credit transaction
+            transaction_repo.create_transaction(
+                user_id=user.id,
+                transaction_type='initial',
+                credits=100,
+                description='Welcome bonus - Initial credits',
+                amount=0.0,
+                status='completed',
+                reference_id=f'INITIAL_{user.id}',
+                metadata={'source': 'registration', 'type': 'welcome_bonus'}
+            )
             
             # Generate tokens
             access_token = create_access_token(identity=str(user.id))
@@ -155,5 +168,23 @@ def init_auth_routes(mysql):
                 'error': 'Token verification failed',
                 'details': str(e)
             }), 401
+    
+    @auth_bp.route('/me', methods=['GET'])
+    @jwt_required()
+    def get_current_user():
+        """Get current user information"""
+        try:
+            current_user_id = get_jwt_identity()
+            user = user_repo.get_user_by_id(int(current_user_id))
+            
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            
+            return jsonify({
+                'user': user.to_dict()
+            }), 200
+            
+        except Exception as e:
+            return jsonify({'error': f'Failed to get user: {str(e)}'}), 500
 
     return auth_bp

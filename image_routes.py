@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify, send_file
 from s3_service import s3_service
-import base64
 from io import BytesIO
 
 # Create Blueprint

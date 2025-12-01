@@ -9,6 +9,7 @@ from datetime import timedelta
 from auth_routes import init_auth_routes
 from avatar_routes import init_avatar_routes
 from garment_routes import init_garment_routes
+from credit_routes import init_credit_routes
 from image_routes import image_bp
 
 # Load environment variables
@@ -84,6 +85,9 @@ app.register_blueprint(avatar_bp)
 garment_bp = init_garment_routes(mysql)
 app.register_blueprint(garment_bp)
 
+credit_bp = init_credit_routes(mysql)
+app.register_blueprint(credit_bp)
+
 app.register_blueprint(image_bp)
 
 
@@ -132,6 +136,14 @@ def index():
                 'refresh': 'POST /api/auth/refresh',
                 'me': 'GET /api/auth/me',
                 'change_password': 'POST /api/auth/change-password'
+            },
+            'credits': {
+                'balance': 'GET /api/credits/balance',
+                'plans': 'GET /api/credits/plans',
+                'transactions': 'GET /api/credits/transactions',
+                'transaction_stats': 'GET /api/credits/transactions/stats',
+                'deduct': 'POST /api/credits/deduct',
+                'add': 'POST /api/credits/add'
             },
             'avatar': {
                 'setup': 'POST /api/avatar/setup',
