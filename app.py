@@ -11,6 +11,7 @@ from avatar_routes import init_avatar_routes
 from garment_routes import init_garment_routes
 from credit_routes import init_credit_routes
 from image_routes import image_bp
+from video_routes import init_video_routes
 
 # Load environment variables
 load_dotenv()
@@ -89,6 +90,9 @@ credit_bp = init_credit_routes(mysql)
 app.register_blueprint(credit_bp)
 
 app.register_blueprint(image_bp)
+
+video_bp = init_video_routes(mysql)
+app.register_blueprint(video_bp)
 
 
 @app.route('/health', methods=['GET'])
@@ -176,6 +180,10 @@ def index():
                 'delete_image': 'DELETE /api/images/<key>',
                 'list_images': 'GET /api/images/list',
                 'check_exists': 'GET /api/images/exists/<key>'
+            },
+            'video': {
+                'generate': 'POST /api/video/generate',
+                'generate_from_url': 'POST /api/video/generate-from-url'
             }
         }
     }), 200
