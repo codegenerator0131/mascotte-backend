@@ -1,209 +1,290 @@
 from dotenv import load_dotenv
 import os
+import time
+import base64
 from google import genai
 from google.genai import types
-import requests
-import time
-import tempfile
 
 load_dotenv()
 
 
 class GeminiService:
     def __init__(self):
-        """Initialize Gemini client with API key"""
-        self.api_key = os.getenv('GEMINI_API_KEY')
-        if not self.api_key:
-            raise ValueError("GEMINI_API_KEY not found in environment variables")
+        """Initialize Gemini client"""
+        # Set API key - the client will automatically use GOOGLE_API_KEY env var
+        # or you can pass it explicitly
+        api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
         
-        self.client = genai.Client(api_key=self.api_key)
-        self.use_mock = os.getenv('USE_MOCK_VIDEO', 'false').lower() == 'true'
+        if api_key:
+            self.client = genai.Client(api_key=api_key)
+        else:
+            # Will use default credentials or GOOGLE_API_KEY env var
+            self.client = genai.Client()
         
-    def generate_video_from_image(self, image_data, prompt=None, duration=None):
+        # Model configuration
+        self.video_model = os.getenv('VEO_MODEL', 'veo-3.1-generate-preview')
+        
+        # Polling configuration
+        self.poll_interval = int(os.getenv('VEO_POLL_INTERVAL', 10))  # seconds
+        self.max_poll_time = int(os.getenv('VEO_MAX_POLL_TIME', 600))  # 10 minutes max
+    
+    def _get_mime_type(self, image_data: bytes) -> str:
+        """Detect image MIME type from bytes"""
+        # Check magic bytes
+        if image_data[:8] == b'\x89PNG\r\n\x1a\n':
+            return 'image/png'
+        elif image_data[:2] == b'\xff\xd8':
+            return 'image/jpeg'
+        elif image_data[:6] in (b'GIF87a', b'GIF89a'):
+            return 'image/gif'
+        elif image_data[:4] == b'RIFF' and image_data[8:12] == b'WEBP':
+            return 'image/webp'
+        else:
+            # Default to JPEG
+            return 'image/jpeg'
+    
+    def _validate_duration(self, duration: int) -> str:
         """
-        Generate video from image using Veo 3.1
+        Validate and convert duration to Veo-compatible value.
+        Veo supports: 4, 6, or 8 seconds
+        """
+        if duration <= 4:
+            return "4"
+        elif duration <= 6:
+            return "6"
+        else:
+            return "8"
+    
+    def generate_video_from_image(
+        self,
+        image_data: bytes,
+        prompt: str,
+        duration: int = 8,
+        aspect_ratio: str = "16:9",
+        negative_prompt: str = None
+    ) -> dict:
+        """
+        Generate video from image using Veo API
         
         Args:
-            image_data: Binary image data
-            prompt: Text prompt for video generation (optional)
-            duration: Video duration in seconds (5-10s supported)
+            image_data: Image bytes from S3
+            prompt: Text prompt describing desired video
+            duration: Video duration (will be mapped to 4, 6, or 8 seconds)
+            aspect_ratio: "16:9" or "9:16"
+            negative_prompt: What to avoid in the video
             
         Returns:
-            dict: Contains video data and metadata
+            dict: Contains video_data (bytes), model, and metadata
         """
         try:
-            if not prompt:
-                prompt = "Create a cinematic fashion video showcasing this outfit with smooth, elegant camera movements. The video should highlight the clothing details and style with professional lighting and composition."
+            print(f"🎬 Starting video generation with {self.video_model}...")
             
-            if not duration:
-                duration = 7
+            # Detect MIME type
+            mime_type = self._get_mime_type(image_data)
+            print(f"📸 Image MIME type: {mime_type}")
             
-            print(f"Generating video...")
-            print(f"Prompt: {prompt}")
-            print(f"Use Mock: {self.use_mock}")
+            # Create image object for Veo
+            image = types.Image(
+                image_bytes=image_data,
+                mime_type=mime_type
+            )
             
-            # Use mock video for testing
-            if self.use_mock:
-                return self._generate_mock_video(image_data, prompt, duration)
-            else:
-                # Try real video generation with Veo 3.1
-                try:
-                    return self._generate_real_video(image_data, prompt, duration)
-                except Exception as e:
-                    print(f"Real video generation failed: {str(e)}")
-                    print("Falling back to mock video...")
-                    return self._generate_mock_video(image_data, prompt, duration)
+            # Validate duration
+            veo_duration = self._validate_duration(duration)
+            print(f"⏱️ Video duration: {veo_duration} seconds")
             
-        except Exception as e:
-            print(f"Video generation error: {str(e)}")
-            raise Exception(f"Video generation failed: {str(e)}")
-    
-    def _generate_mock_video(self, image_data, prompt, duration):
-        """Generate a mock video response for testing"""
-        print("✅ Using mock video for testing")
-        
-        # Use a sample fashion/model video URL
-        mock_video_url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-        
-        return {
-            'video_data': None,
-            'video_url': mock_video_url,
-            'prompt': prompt,
-            'duration': duration,
-            'model': 'mock-video-v1',
-            'note': 'Mock video for testing. Set USE_MOCK_VIDEO=false for real generation.'
-        }
-    
-    def _generate_real_video(self, image_data, prompt, duration):
-        """
-        Generate real video using Veo 3.1
-        Using direct file upload with correct API
-        """
-        try:
-            print("🎬 Starting real video generation with Veo 3.1...")
+            # Build config
+            config_params = {
+                "aspect_ratio": aspect_ratio,
+                "duration_seconds": veo_duration,
+            }
             
-            # Method 1: Try using PIL Image directly (simplest)
-            try:
-                from PIL import Image
-                import io
+            if negative_prompt:
+                config_params["negative_prompt"] = negative_prompt
+            
+            config = types.GenerateVideosConfig(**config_params)
+            
+            # Start video generation (async operation)
+            print("🚀 Submitting video generation request...")
+            operation = self.client.models.generate_videos(
+                model=self.video_model,
+                prompt=prompt,
+                image=image,
+                config=config
+            )
+            
+            # Poll for completion
+            start_time = time.time()
+            while not operation.done:
+                elapsed = time.time() - start_time
                 
-                print("🖼️ Loading image with PIL...")
-                pil_image = Image.open(io.BytesIO(image_data))
-                print(f"✅ Image loaded: {pil_image.size}")
+                if elapsed > self.max_poll_time:
+                    raise TimeoutError(f"Video generation timed out after {self.max_poll_time} seconds")
                 
-                # Generate video using PIL Image
-                print("🎥 Generating video with Veo 3.1...")
-                operation = self.client.models.generate_videos(
-                    model="veo-3.1-generate-preview",
-                    prompt=prompt,
-                    image=pil_image,
-                )
-                
-                print(f"⏳ Operation started: {operation.name}")
-                
-            except Exception as pil_error:
-                print(f"PIL method failed: {str(pil_error)}")
-                print("Trying file upload method...")
-                
-                # Method 2: Upload file using correct API
-                # Save to temp file first
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png', mode='wb') as temp_file:
-                    temp_file.write(image_data)
-                    temp_path = temp_file.name
-                
-                try:
-                    # Upload using the File API
-                    print(f"📤 Uploading file from {temp_path}...")
-                    
-                    # Try different upload methods
-                    try:
-                        # Method A: Upload with file path
-                        with open(temp_path, 'rb') as f:
-                            uploaded_file = self.client.files.upload(file=f)
-                    except:
-                        # Method B: Upload with just the file path
-                        uploaded_file = self.client.files.upload(temp_path)
-                    
-                    print(f"✅ File uploaded: {uploaded_file.name}")
-                    
-                    # Generate video using uploaded file
-                    print("🎥 Generating video with Veo 3.1...")
-                    operation = self.client.models.generate_videos(
-                        model="veo-3.1-generate-preview",
-                        prompt=prompt,
-                        image=uploaded_file,
-                    )
-                    
-                    print(f"⏳ Operation started: {operation.name}")
-                    
-                finally:
-                    # Clean up temp file
-                    if os.path.exists(temp_path):
-                        os.unlink(temp_path)
-            
-            # Poll the operation status until the video is ready
-            max_wait_time = 300  # 5 minutes max
-            elapsed_time = 0
-            poll_interval = 10  # Check every 10 seconds
-            
-            while not operation.done and elapsed_time < max_wait_time:
-                print(f"⏳ Waiting for video generation... ({elapsed_time}s elapsed)")
-                time.sleep(poll_interval)
-                elapsed_time += poll_interval
+                print(f"⏳ Waiting for video generation... ({int(elapsed)}s elapsed)")
+                time.sleep(self.poll_interval)
                 operation = self.client.operations.get(operation)
             
-            if not operation.done:
-                raise Exception(f"Video generation timed out after {max_wait_time} seconds")
-            
-            print("✅ Video generation completed!")
+            print("✅ Video generation complete!")
             
             # Get the generated video
-            video = operation.response.generated_videos[0]
+            if not operation.response or not operation.response.generated_videos:
+                raise ValueError("No video was generated")
             
-            # Download the video data
+            generated_video = operation.response.generated_videos[0]
+            
+            # Download video bytes
             print("📥 Downloading video...")
-            video_bytes = self.client.files.download(file=video.video)
+            self.client.files.download(file=generated_video.video)
+            video_bytes = generated_video.video.video_bytes
             
-            # Convert to bytes if needed
-            if hasattr(video_bytes, 'read'):
-                video_data = video_bytes.read()
-            else:
-                video_data = video_bytes
+            if not video_bytes:
+                raise ValueError("Video download returned empty data")
             
-            print(f"✅ Video downloaded: {len(video_data)} bytes")
+            print(f"✅ Video downloaded: {len(video_bytes)} bytes")
             
             return {
-                'video_data': video_data,
-                'video_url': None,
-                'prompt': prompt,
-                'duration': duration,
-                'model': 'veo-3.1-generate-preview',
-                'generation_time': elapsed_time
+                'video_data': video_bytes,
+                'model': self.video_model,
+                'duration': veo_duration,
+                'aspect_ratio': aspect_ratio
             }
             
         except Exception as e:
-            error_msg = str(e)
-            print(f"❌ Real video generation failed: {error_msg}")
-            
-            # Check for specific error types
-            if "not supported" in error_msg.lower() or "not found" in error_msg.lower():
-                raise Exception("Veo 3.1 is not available in your region or account. Please use USE_MOCK_VIDEO=true")
-            elif "quota" in error_msg.lower():
-                raise Exception("API quota exceeded. Please check your Gemini API usage limits.")
-            else:
-                raise Exception(f"Video generation failed: {error_msg}")
+            print(f"❌ Video generation error: {str(e)}")
+            raise
     
-    def generate_video_from_url(self, image_url, prompt=None, duration=None):
-        """Generate video from image URL"""
+    def generate_video_from_url(
+        self,
+        image_url: str,
+        prompt: str,
+        duration: int = 8,
+        aspect_ratio: str = "16:9",
+        negative_prompt: str = None
+    ) -> dict:
+        """
+        Generate video from image URL using Veo API
+        
+        Args:
+            image_url: URL of the source image
+            prompt: Text prompt describing desired video
+            duration: Video duration (will be mapped to 4, 6, or 8 seconds)
+            aspect_ratio: "16:9" or "9:16"
+            negative_prompt: What to avoid in the video
+            
+        Returns:
+            dict: Contains video_data (bytes), model, and metadata
+        """
+        import requests
+        
         try:
-            response = requests.get(image_url)
+            print(f"📥 Fetching image from URL: {image_url}")
+            
+            # Download image from URL
+            response = requests.get(image_url, timeout=30)
             response.raise_for_status()
             image_data = response.content
             
-            return self.generate_video_from_image(image_data, prompt, duration)
+            print(f"✅ Image downloaded: {len(image_data)} bytes")
+            
+            # Use the image-based generation
+            return self.generate_video_from_image(
+                image_data=image_data,
+                prompt=prompt,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                negative_prompt=negative_prompt
+            )
+            
+        except requests.RequestException as e:
+            print(f"❌ Failed to download image: {str(e)}")
+            raise ValueError(f"Failed to download image from URL: {str(e)}")
+    
+    def generate_video_text_only(
+        self,
+        prompt: str,
+        duration: int = 8,
+        aspect_ratio: str = "16:9",
+        negative_prompt: str = None
+    ) -> dict:
+        """
+        Generate video from text prompt only (no image input)
+        
+        Args:
+            prompt: Text prompt describing desired video
+            duration: Video duration (will be mapped to 4, 6, or 8 seconds)
+            aspect_ratio: "16:9" or "9:16"
+            negative_prompt: What to avoid in the video
+            
+        Returns:
+            dict: Contains video_data (bytes), model, and metadata
+        """
+        try:
+            print(f"🎬 Starting text-to-video generation with {self.video_model}...")
+            
+            # Validate duration
+            veo_duration = self._validate_duration(duration)
+            print(f"⏱️ Video duration: {veo_duration} seconds")
+            
+            # Build config
+            config_params = {
+                "aspect_ratio": aspect_ratio,
+                "duration_seconds": veo_duration,
+            }
+            
+            if negative_prompt:
+                config_params["negative_prompt"] = negative_prompt
+            
+            config = types.GenerateVideosConfig(**config_params)
+            
+            # Start video generation
+            print("🚀 Submitting video generation request...")
+            operation = self.client.models.generate_videos(
+                model=self.video_model,
+                prompt=prompt,
+                config=config
+            )
+            
+            # Poll for completion
+            start_time = time.time()
+            while not operation.done:
+                elapsed = time.time() - start_time
+                
+                if elapsed > self.max_poll_time:
+                    raise TimeoutError(f"Video generation timed out after {self.max_poll_time} seconds")
+                
+                print(f"⏳ Waiting for video generation... ({int(elapsed)}s elapsed)")
+                time.sleep(self.poll_interval)
+                operation = self.client.operations.get(operation)
+            
+            print("✅ Video generation complete!")
+            
+            # Get the generated video
+            if not operation.response or not operation.response.generated_videos:
+                raise ValueError("No video was generated")
+            
+            generated_video = operation.response.generated_videos[0]
+            
+            # Download video bytes
+            print("📥 Downloading video...")
+            self.client.files.download(file=generated_video.video)
+            video_bytes = generated_video.video.video_bytes
+            
+            if not video_bytes:
+                raise ValueError("Video download returned empty data")
+            
+            print(f"✅ Video downloaded: {len(video_bytes)} bytes")
+            
+            return {
+                'video_data': video_bytes,
+                'model': self.video_model,
+                'duration': veo_duration,
+                'aspect_ratio': aspect_ratio
+            }
             
         except Exception as e:
-            raise Exception(f"Failed to generate video from URL: {str(e)}")
+            print(f"❌ Video generation error: {str(e)}")
+            raise
 
 
 gemini_service = GeminiService()
