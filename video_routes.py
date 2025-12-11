@@ -16,7 +16,7 @@ def init_video_routes(mysql):
     VIDEO_GENERATION_COST = 50  # 50 credits per video generation
     
     # Default fashion video prompt
-    DEFAULT_FASHION_PROMPT = """Create a cinematic fashion video showcasing this outfit with smooth, elegant camera movements. The video should highlight the clothing details and style with professional lighting and composition."""
+    DEFAULT_FASHION_PROMPT = """Please generate the fashion video using this image."""
     
     @video_bp.route('/generate', methods=['POST'])
     @jwt_required()
