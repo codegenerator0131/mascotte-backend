@@ -77,38 +77,69 @@ class GeminiService:
     def _generate_real_video(self, image_data, prompt, duration):
         """
         Generate real video using Veo 3.1
-        Using file upload approach (correct method)
+        Using direct file upload with correct API
         """
         try:
             print("🎬 Starting real video generation with Veo 3.1...")
             
-            # Upload image file to Gemini first
-            print("📤 Uploading image to Gemini...")
-            
-            # Save image to temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
-                temp_file.write(image_data)
-                temp_path = temp_file.name
-            
+            # Method 1: Try using PIL Image directly (simplest)
             try:
-                # Upload the file to Gemini
-                uploaded_file = self.client.files.upload(path=temp_path)
-                print(f"✅ File uploaded: {uploaded_file.name}")
+                from PIL import Image
+                import io
                 
-            finally:
-                # Clean up temp file
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
-            
-            # Generate video using the uploaded file
-            print("🎥 Generating video with Veo 3.1...")
-            operation = self.client.models.generate_videos(
-                model="veo-3.1-generate-preview",
-                prompt=prompt,
-                image=uploaded_file,
-            )
-            
-            print(f"⏳ Operation started: {operation.name}")
+                print("🖼️ Loading image with PIL...")
+                pil_image = Image.open(io.BytesIO(image_data))
+                print(f"✅ Image loaded: {pil_image.size}")
+                
+                # Generate video using PIL Image
+                print("🎥 Generating video with Veo 3.1...")
+                operation = self.client.models.generate_videos(
+                    model="veo-3.1-generate-preview",
+                    prompt=prompt,
+                    image=pil_image,
+                )
+                
+                print(f"⏳ Operation started: {operation.name}")
+                
+            except Exception as pil_error:
+                print(f"PIL method failed: {str(pil_error)}")
+                print("Trying file upload method...")
+                
+                # Method 2: Upload file using correct API
+                # Save to temp file first
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.png', mode='wb') as temp_file:
+                    temp_file.write(image_data)
+                    temp_path = temp_file.name
+                
+                try:
+                    # Upload using the File API
+                    print(f"📤 Uploading file from {temp_path}...")
+                    
+                    # Try different upload methods
+                    try:
+                        # Method A: Upload with file path
+                        with open(temp_path, 'rb') as f:
+                            uploaded_file = self.client.files.upload(file=f)
+                    except:
+                        # Method B: Upload with just the file path
+                        uploaded_file = self.client.files.upload(temp_path)
+                    
+                    print(f"✅ File uploaded: {uploaded_file.name}")
+                    
+                    # Generate video using uploaded file
+                    print("🎥 Generating video with Veo 3.1...")
+                    operation = self.client.models.generate_videos(
+                        model="veo-3.1-generate-preview",
+                        prompt=prompt,
+                        image=uploaded_file,
+                    )
+                    
+                    print(f"⏳ Operation started: {operation.name}")
+                    
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
             
             # Poll the operation status until the video is ready
             max_wait_time = 300  # 5 minutes max
