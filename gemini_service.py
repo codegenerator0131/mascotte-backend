@@ -5,8 +5,6 @@ from google.genai import types
 import requests
 import base64
 import time
-import io
-from PIL import Image
 
 load_dotenv()
 
@@ -84,21 +82,28 @@ class GeminiService:
         try:
             print("🎬 Starting real video generation with Veo 3.1...")
             
-            # Step 1: Convert image_data to PIL Image
-            pil_image = Image.open(io.BytesIO(image_data))
-            print(f"✅ Image loaded: {pil_image.size}")
+            # Step 1: Convert image_data to base64
+            image_base64 = base64.b64encode(image_data).decode('utf-8')
+            print(f"✅ Image converted to base64: {len(image_base64)} chars")
             
-            # Step 2: Generate video with Veo 3.1 using the image
+            # Step 2: Prepare image in the correct format
+            # The API expects bytesBase64Encoded and mimeType
+            image_input = {
+                'bytesBase64Encoded': image_base64,
+                'mimeType': 'image/jpeg'
+            }
+            
+            # Step 3: Generate video with Veo 3.1 using the image
             print("🎥 Generating video with Veo 3.1...")
             operation = self.client.models.generate_videos(
                 model="veo-3.1-generate-preview",
                 prompt=prompt,
-                image=pil_image,
+                image=image_input,
             )
             
             print(f"⏳ Operation started: {operation.name}")
             
-            # Step 3: Poll the operation status until the video is ready
+            # Step 4: Poll the operation status until the video is ready
             max_wait_time = 300  # 5 minutes max
             elapsed_time = 0
             poll_interval = 10  # Check every 10 seconds
@@ -114,7 +119,7 @@ class GeminiService:
             
             print("✅ Video generation completed!")
             
-            # Step 4: Get the generated video
+            # Step 5: Get the generated video
             video = operation.response.generated_videos[0]
             
             # Download the video data
