@@ -92,8 +92,17 @@ def init_video_routes(mysql):
                 )
                 
                 video_url = f"https://{s3_service.bucket_name}.s3.{os.getenv('AWS_BUCKET_REGION')}.amazonaws.com/{video_key}"
+                print(f"✅ Video uploaded to S3: {video_url}")
+                
             elif video_result.get('video_url'):
                 video_url = video_result['video_url']
+                print(f"✅ Using video URL: {video_url}")
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Video generation returned no data'
+                }), 500
+            
             
             return jsonify({
                 'success': True,
@@ -104,7 +113,9 @@ def init_video_routes(mysql):
                     'image_key': image_key,
                     'prompt': prompt,
                     'duration': duration,
+                    'model': video_result.get('model'),
                     'credits_used': VIDEO_GENERATION_COST,
+                    'note': video_result.get('note')  # For mock video indicator
                 }
             }), 201
             
@@ -196,6 +207,7 @@ def init_video_routes(mysql):
                     'prompt': prompt,
                     'duration': duration,
                     'credits_used': VIDEO_GENERATION_COST,
+                    'note': video_result.get('note')
                 }
             }), 201
             
