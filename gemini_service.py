@@ -3,8 +3,8 @@ import os
 from google import genai
 from google.genai import types
 import requests
-import base64
 import time
+import tempfile
 
 load_dotenv()
 
@@ -77,33 +77,40 @@ class GeminiService:
     def _generate_real_video(self, image_data, prompt, duration):
         """
         Generate real video using Veo 3.1
-        Based on official Gemini API example
+        Using file upload approach (correct method)
         """
         try:
             print("🎬 Starting real video generation with Veo 3.1...")
             
-            # Step 1: Convert image_data to base64
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
-            print(f"✅ Image converted to base64: {len(image_base64)} chars")
+            # Upload image file to Gemini first
+            print("📤 Uploading image to Gemini...")
             
-            # Step 2: Prepare image in the correct format
-            # The API expects bytesBase64Encoded and mimeType
-            image_input = {
-                'bytesBase64Encoded': image_base64,
-                'mimeType': 'image/jpeg'
-            }
+            # Save image to temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
+                temp_file.write(image_data)
+                temp_path = temp_file.name
             
-            # Step 3: Generate video with Veo 3.1 using the image
+            try:
+                # Upload the file to Gemini
+                uploaded_file = self.client.files.upload(path=temp_path)
+                print(f"✅ File uploaded: {uploaded_file.name}")
+                
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            
+            # Generate video using the uploaded file
             print("🎥 Generating video with Veo 3.1...")
             operation = self.client.models.generate_videos(
                 model="veo-3.1-generate-preview",
                 prompt=prompt,
-                image=image_input,
+                image=uploaded_file,
             )
             
             print(f"⏳ Operation started: {operation.name}")
             
-            # Step 4: Poll the operation status until the video is ready
+            # Poll the operation status until the video is ready
             max_wait_time = 300  # 5 minutes max
             elapsed_time = 0
             poll_interval = 10  # Check every 10 seconds
@@ -119,7 +126,7 @@ class GeminiService:
             
             print("✅ Video generation completed!")
             
-            # Step 5: Get the generated video
+            # Get the generated video
             video = operation.response.generated_videos[0]
             
             # Download the video data
