@@ -404,7 +404,7 @@ def init_video_routes(mysql):
                 'error': f'Failed to generate video: {str(e)}'
             }), 500
     
-    @video_bp.route('/<key>', methods=['GET'])
+    @video_bp.route('/<path:key>', methods=['GET'])
     def get_video(key):
         """
         Get and stream a video by key
@@ -413,6 +413,8 @@ def init_video_routes(mysql):
             key: S3 object key (e.g., "videos/uuid.mp4")
         """
         try:
+            print(f"🎬 Fetching video from S3: {key}")
+            
             # Get video from S3
             response = s3_service.s3_client.get_object(
                 Bucket=s3_service.bucket_name,
@@ -422,6 +424,8 @@ def init_video_routes(mysql):
             video_data = response['Body'].read()
             content_type = response.get('ContentType', 'video/mp4')
             
+            print(f"✅ Video retrieved successfully: {len(video_data)} bytes")
+            
             # Return video as response with proper headers for streaming
             from flask import Response
             return Response(
@@ -430,20 +434,26 @@ def init_video_routes(mysql):
                 headers={
                     'Accept-Ranges': 'bytes',
                     'Content-Length': str(len(video_data)),
-                    'Cache-Control': 'public, max-age=31536000'
+                    'Cache-Control': 'public, max-age=31536000',
+                    'Access-Control-Allow-Origin': '*',
                 }
             )
 
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            error_code = e.response['Error']['Code']
+            print(f"❌ S3 Error - Code: {error_code}, Key: {key}")
+            
+            if error_code == 'NoSuchKey':
                 return jsonify({
                     'success': False,
-                    'error': 'Video not found'
+                    'error': f'Video not found: {key}'
                 }), 404
+            
             return jsonify({
                 'success': False,
                 'error': f'Failed to retrieve video: {str(e)}'
             }), 500
+            
         except Exception as e:
             import traceback
             print(f"❌ Video retrieval error: {str(e)}")
@@ -453,4 +463,5 @@ def init_video_routes(mysql):
                 'success': False,
                 'error': f'Failed to retrieve video: {str(e)}'
             }), 500
+            
     return video_bp
